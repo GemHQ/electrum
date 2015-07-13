@@ -124,45 +124,101 @@ class PendingAccount(Account):
     def get_xpubkeys(self, for_change, n):
         return self.get_pubkeys(for_change, n)
 
-class ImportedAccount(Account):
+class P2SHAccount(object):
+
+    def pubkeys_to_address(self, pubkeys, m, sort=True):
+        pubkeys = sorted(pubkeys) if sort else pubkeys
+        redeem_script = Transaction.multisig_script(pubkeys, m)
+        address = hash_160_to_bc_address(hash_160(redeem_script.decode('hex')), 5)
+        return address
+
+    def redeem_script(self, pubkeys=None, m=None):
+        pubkeys = self.xpubs if pubkeys is None else pubkeys
+        m = self.m if m is None else m
+        return Transaction.multisig_script(pubkeys, m)
+
+    def get_address(self, pubkeys=None, m=None):
+        pubkeys = self.xpubs if pubkeys is None else pubkeys
+        m = self.m if m is None else m
+        return self.pubkeys_to_address(pubkeys, m)
+
+
+class ImportedAccount(Account, P2SHAccount):
+
     def __init__(self, d):
-        self.keypairs = d['imported']
+        self.keypairs = d.get('imported', {})
+        self.p2sh_groups = d.get('imported_p2sh', {})
 
     def synchronize(self, wallet):
         return
 
+    def pubkeys_to_address(self, pubkeys, m):
+        try:
+            return super(P2SHAccount, self).pubkeys_to_address(pubkeys, m, sort=False)
+        except:
+            return super(Account, self).pubkeys_to_address(pubkeys, m, sort=False)
+
     def get_addresses(self, for_change):
-        return [] if for_change else sorted(self.keypairs.keys())
+        return [] if for_change else sorted(
+            self.keypairs.keys() +
+            self.p2sh_groups.keys()
+            # To compute these for verification, replace p2sh_groups.keys with:
+            # [ pubkeys_to_address(
+            #     [ xpub for xpub, xprv in record['keypairs'] ],
+            #     record['m']) for record in self.p2sh_groups.values() ]
+        )
 
     def get_pubkey(self, *sequence):
         for_change, i = sequence
         assert for_change == 0
         addr = self.get_addresses(0)[i]
-        return self.keypairs[addr][0]
+        return self.keypairs[addr][0] if addr in keypairs else \
+            [ k['xpub'] for k in self.p2sh_groups[addr]['keypairs'] ]
 
     def get_xpubkeys(self, for_change, n):
         return self.get_pubkeys(for_change, n)
+
+    def get_private_keys(self, sequence, wallet, password):
+        return self.get_private_key(sequence, wallet, password)
 
     def get_private_key(self, sequence, wallet, password):
         from wallet import pw_decode
         for_change, i = sequence
         assert for_change == 0
         address = self.get_addresses(0)[i]
-        pk = pw_decode(self.keypairs[address][1], password)
-        # this checks the password
-        if address != address_from_private_key(pk):
-            raise InvalidPassword()
-        return [pk]
+        try:
+            pk = pw_decode(self.keypairs[address][1], password)
+            # this checks the password
+            if address != address_from_private_key(pk):
+                raise InvalidPassword()
+            return [pk]
+        except IndexError as e:
+            pks = [ pw_decode(k[1]) for k in self.p2sh_groups(address)['keypairs'] ]
+            return pks
 
     def has_change(self):
         return False
 
     def add(self, address, pubkey, privkey, password):
         from wallet import pw_encode
-        self.keypairs[address] = (pubkey, pw_encode(privkey, password ))
+        self.keypairs[address] = ( pubkey, pw_encode(privkey, password) )
+
+    def add_p2sh(self, m, keypairs, password, address=None):
+        # keypairs should look like: [ (xpub,xpriv), ... ]
+        from wallet import pw_encode
+        calculated_address = self.pubkeys_to_address(
+            pubkeys=[ kp[0].decode('hex') for kp in keypairs ], m=m)
+        assert (calculated_address == address or address is None), "Specified address doesn't match calculated address."
+        self.p2sh_groups[calculated_address] = {
+            'keypairs': [ ( k[0], pw_encode(k[1], password) ) for k in keypairs ],
+            'm': m
+        }
 
     def remove(self, address):
-        self.keypairs.pop(address)
+        try:
+            del self.keypairs[address]
+        except:
+            del self.p2sh_groups[address]
 
     def dump(self):
         return {'imported':self.keypairs}
@@ -171,12 +227,17 @@ class ImportedAccount(Account):
         return _('Imported keys')
 
     def update_password(self, old_password, new_password):
+        def update_key_password(key, old, new):
+            pw_encode(pw_decode(key, old), new)
+
         for k, v in self.keypairs.items():
             pubkey, a = v
-            b = pw_decode(a, old_password)
-            c = pw_encode(b, new_password)
-            self.keypairs[k] = (pubkey, c)
-
+            self.keypairs[k] = (
+                pubkey, update_key_password(a, old_password, new_password))
+        for k, v in self.p2sh_groups.items():
+            for index, (pubkey, a) in enumerate(self.p2sh_groups[k]['keypairs']):
+                self.p2sh_groups[k]['keypairs'][index] = (
+                    pubkey, update_key_password(a, old_password, new_password))
 
 class OldAccount(Account):
     """  Privatekey(type,n) = Master_private_key + H(n|S|type)  """
@@ -364,36 +425,31 @@ class BIP32_Account(Account):
         return "Main account" if k == '0' else "Account " + k
 
 
-
-
-class BIP32_Account_2of2(BIP32_Account):
+class BIP32_Account_2of2(BIP32_Account, P2SHAccount):
 
     def __init__(self, v):
         BIP32_Account.__init__(self, v)
         self.xpub2 = v['xpub2']
+        self.m = 2
 
     def dump(self):
         d = BIP32_Account.dump(self)
         d['xpub2'] = self.xpub2
         return d
 
-    def get_pubkeys(self, for_change, n):
-        return self.get_pubkey(for_change, n)
-
     def derive_pubkeys(self, for_change, n):
         return map(lambda x: self.derive_pubkey_from_xpub(x, for_change, n), self.get_master_pubkeys())
 
     def redeem_script(self, for_change, n):
-        pubkeys = self.get_pubkeys(for_change, n)
-        return Transaction.multisig_script(sorted(pubkeys), 2)
+        return super(P2SHAccount, self).redeem_script(
+            self.derive_pubkeys(for_change, n))
 
     def pubkeys_to_address(self, pubkeys):
-        redeem_script = Transaction.multisig_script(sorted(pubkeys), 2)
-        address = hash_160_to_bc_address(hash_160(redeem_script.decode('hex')), 5)
-        return address
+        return super(P2SHAccount, self).pubkeys_to_address(pubkeys)
 
     def get_address(self, for_change, n):
-        return self.pubkeys_to_address(self.get_pubkeys(for_change, n))
+        return super(P2SHAccount, self).get_address(
+            self.derive_pubkeys(for_change, n))
 
     def get_master_pubkeys(self):
         return [self.xpub, self.xpub2]
@@ -407,6 +463,7 @@ class BIP32_Account_2of3(BIP32_Account_2of2):
     def __init__(self, v):
         BIP32_Account_2of2.__init__(self, v)
         self.xpub3 = v['xpub3']
+        self.m = 3
 
     def dump(self):
         d = BIP32_Account_2of2.dump(self)

@@ -336,6 +336,18 @@ class Commands:
             out = "Error: " + str(e)
         return out
 
+    @command('wp')
+    def importp2sh(self, address, m, keys ):
+        """Import an m-of-n p2sh set of keys (non-HD)."""
+        try:
+            addr = self.wallet.import_p2sh(m, *keys.split(','),
+                                           password=self.password,
+                                           address=address)
+            out = "Keypair imported: " + addr
+        except Exception as e:
+            out = "Error: " + str(e)
+        return out
+
     def _resolver(self, x):
         if x is None:
             return None

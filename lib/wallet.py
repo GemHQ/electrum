@@ -67,7 +67,7 @@ class WalletStorage(object):
             return
         try:
             self.data = json.loads(data)
-        except:
+        except Exception as e:
             try:
                 d = ast.literal_eval(data)  #parse raw data from reading wallet file
             except Exception as e:
@@ -246,7 +246,7 @@ class Abstract_Wallet(object):
             if self.wallet_type == 'old' and k in [0, '0']:
                 v['mpk'] = self.storage.get('master_public_key')
                 self.accounts['0'] = OldAccount(v)
-            elif v.get('imported'):
+            elif v.get('imported') or v.get('imported_p2sh'):
                 self.accounts[k] = ImportedAccount(v)
             elif v.get('xpub3'):
                 self.accounts[k] = BIP32_Account_2of3(v)
@@ -289,6 +289,35 @@ class Abstract_Wallet(object):
     def has_imported_keys(self):
         account = self.accounts.get(IMPORTED_ACCOUNT)
         return account is not None
+
+    def import_p2sh(self, m, *keys, **kwargs):
+        assert self.can_import(), 'This wallet cannot import p2sh private keys'
+        pairs = []
+        try:
+            for sec in keys:
+                try:
+                    pairs.append(( public_key_from_private_key(sec), sec ))
+                except Exception as e:
+                    print(e)
+                    pairs.append(( sec, None ))
+        except Exception:
+            raise Exception('Invalid private key')
+
+        if self.is_mine(kwargs.get('address', None)):
+            raise Exception('Address already in wallet')
+
+        if self.accounts.get(IMPORTED_ACCOUNT) is None:
+            self.accounts[IMPORTED_ACCOUNT] = ImportedAccount({'imported':{}})
+        print(pairs)
+        self.accounts[IMPORTED_ACCOUNT].add_p2sh(m,
+                                                 pairs,
+                                                 kwargs.get('password', None),
+                                                 address=kwargs.get('address', None))
+        self.save_accounts()
+
+        if self.synchronizer:
+            self.synchronizer.add(address)
+        return address
 
     def import_key(self, sec, password):
         assert self.can_import(), 'This wallet cannot import private keys'
@@ -1329,6 +1358,7 @@ class Imported_Wallet(Abstract_Wallet):
             self.accounts[IMPORTED_ACCOUNT] = ImportedAccount({'imported':{}})
 
     def is_watching_only(self):
+        return False
         acc = self.accounts[IMPORTED_ACCOUNT]
         n = acc.keypairs.values()
         return len(n) > 0 and n == [[None, None]] * len(n)
@@ -1849,6 +1879,7 @@ class OldWallet(Deterministic_Wallet):
         import old_mnemonic
         s = self.get_seed(password)
         return ' '.join(old_mnemonic.mn_encode(s))
+
 
 
 
