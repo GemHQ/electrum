@@ -176,18 +176,27 @@ class ImportedAccount(P2SHAccount, Account):
             #     record['m']) for record in self.p2sh_groups.values() ]
         )
 
+    def has_p2sh_pubkey(self, pubkey):
+        return len([ k[0] for g in self.p2sh_groups.values()
+                          for k in g['keypairs'] if k[0] == pubkey ]) > 0
+
+    def get_p2sh_privkey_from_pubkey(self, pubkey, password):
+        return pw_decode([ k[1] for g in self.p2sh_groups.values()
+                           for k in g['keypairs'] if k[0] == pubkey ][0], password)
+
+    def get_xpubkeys(self, for_change, n):
+        return self.get_pubkeys(for_change, n)
+
     def get_pubkeys(self, *sequence):
         pks = self.get_pubkey(*sequence)
         return pks if isinstance(pks, list) else [ pks ]
+
     def get_pubkey(self, *sequence):
         for_change, i = sequence
         assert for_change == 0
         addr = self.get_addresses(0)[i]
         return self.keypairs[addr][0] if addr in self.keypairs else \
             [ k[0] for k in self.p2sh_groups[addr]['keypairs'] ]
-
-    def get_xpubkeys(self, for_change, n):
-        return self.get_pubkeys(for_change, n)
 
     def get_private_keys(self, sequence, wallet, password):
         return self.get_private_key(sequence, wallet, password)

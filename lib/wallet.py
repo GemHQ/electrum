@@ -960,7 +960,7 @@ class Abstract_Wallet(object):
         self.sign_transaction(tx, password)
         return tx
 
-    def add_input_info(self, txin):
+    def add_input_info(self, txin, sort=True):
         address = txin['address']
         account_id, sequence = self.get_address_index(address)
         account = self.accounts[account_id]
@@ -968,7 +968,8 @@ class Abstract_Wallet(object):
         pubkeys = account.get_pubkeys(*sequence)
         x_pubkeys = account.get_xpubkeys(*sequence)
         # sort pubkeys and x_pubkeys, using the order of pubkeys
-        pubkeys, x_pubkeys = zip( *sorted(zip(pubkeys, x_pubkeys)))
+        if sort:
+            pubkeys, x_pubkeys = zip( *sorted(zip(pubkeys, x_pubkeys)) )
         txin['pubkeys'] = list(pubkeys)
         txin['x_pubkeys'] = list(x_pubkeys)
         txin['signatures'] = [None] * len(pubkeys)
@@ -1204,7 +1205,6 @@ class Abstract_Wallet(object):
 
 
     def get_private_key_from_xpubkey(self, x_pubkey, password):
-#       import pdb; pdb.set_trace()
         if x_pubkey[0:2] in ['02','03','04']:
             addr = bitcoin.public_key_to_bc_address(x_pubkey.decode('hex'))
             if self.is_mine(addr):
@@ -1362,6 +1362,19 @@ class Imported_Wallet(Abstract_Wallet):
         a = self.accounts.get(IMPORTED_ACCOUNT)
         if not a:
             self.accounts[IMPORTED_ACCOUNT] = ImportedAccount({'imported':{}})
+
+
+    def add_input_info(self, txin):
+        return super(Imported_Wallet, self).add_input_info(txin, sort=False)
+
+    def get_private_key_from_xpubkey(self, x_pubkey, password):
+        if self.accounts[IMPORTED_ACCOUNT].has_p2sh_pubkey(x_pubkey):
+            return self.accounts[IMPORTED_ACCOUNT].get_p2sh_privkey_from_pubkey(
+                x_pubkey, password)
+        else:
+            return super(
+                Imported_Wallet, self).get_private_key_from_xpubkey(x_pubkey,
+                                                                    password)
 
     def is_watching_only(self):
         return False
