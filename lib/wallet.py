@@ -292,6 +292,8 @@ class Abstract_Wallet(object):
 
     def import_p2sh(self, m, *keys, **kwargs):
         assert self.can_import(), 'This wallet cannot import p2sh private keys'
+        address = kwargs.get('address', None)
+        password = kwargs.get('password', None)
         pairs = []
         try:
             for sec in keys:
@@ -308,15 +310,17 @@ class Abstract_Wallet(object):
 
         if self.accounts.get(IMPORTED_ACCOUNT) is None:
             self.accounts[IMPORTED_ACCOUNT] = ImportedAccount({'imported':{}})
-        print(pairs)
-        self.accounts[IMPORTED_ACCOUNT].add_p2sh(m,
-                                                 pairs,
-                                                 kwargs.get('password', None),
-                                                 address=kwargs.get('address', None))
+
+        self.accounts[IMPORTED_ACCOUNT].add_p2sh(m=m,
+                                                 keypairs=pairs,
+                                                 password=password,
+                                                 address=address)
+
         self.save_accounts()
 
         if self.synchronizer:
             self.synchronizer.add(address)
+
         return address
 
     def import_key(self, sec, password):
@@ -1158,6 +1162,7 @@ class Abstract_Wallet(object):
         d = {}
         for k, v in self.accounts.items():
             d[k] = v.dump()
+            print(d[k])
         self.storage.put('accounts', d, True)
 
     def can_import(self):

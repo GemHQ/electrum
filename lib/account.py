@@ -172,8 +172,8 @@ class ImportedAccount(Account, P2SHAccount):
         for_change, i = sequence
         assert for_change == 0
         addr = self.get_addresses(0)[i]
-        return self.keypairs[addr][0] if addr in keypairs else \
-            [ k['xpub'] for k in self.p2sh_groups[addr]['keypairs'] ]
+        return self.keypairs[addr][0] if addr in self.keypairs else \
+            [ k[0] for k in self.p2sh_groups[addr]['keypairs'] ]
 
     def get_xpubkeys(self, for_change, n):
         return self.get_pubkeys(for_change, n)
@@ -193,7 +193,7 @@ class ImportedAccount(Account, P2SHAccount):
                 raise InvalidPassword()
             return [pk]
         except IndexError as e:
-            pks = [ pw_decode(k[1]) for k in self.p2sh_groups(address)['keypairs'] ]
+            pks = [ pw_decode(k[1]) for k in self.p2sh_groups[address]['keypairs'] ]
             return pks
 
     def has_change(self):
@@ -204,13 +204,13 @@ class ImportedAccount(Account, P2SHAccount):
         self.keypairs[address] = ( pubkey, pw_encode(privkey, password) )
 
     def add_p2sh(self, m, keypairs, password, address=None):
-        # keypairs should look like: [ (xpub,xpriv), ... ]
+        # keypairs should look like: [ (pubkey,privkey), ... ]
         from wallet import pw_encode
         calculated_address = self.pubkeys_to_address(
-            pubkeys=[ kp[0].decode('hex') for kp in keypairs ], m=m)
+            pubkeys=[ kp[0] for kp in keypairs ], m=m)
         assert (calculated_address == address or address is None), "Specified address doesn't match calculated address."
         self.p2sh_groups[calculated_address] = {
-            'keypairs': [ ( k[0], pw_encode(k[1], password) ) for k in keypairs ],
+            'keypairs': [ ( kp[0], pw_encode(kp[1], password) ) for kp in keypairs ],
             'm': m
         }
 
@@ -221,7 +221,8 @@ class ImportedAccount(Account, P2SHAccount):
             del self.p2sh_groups[address]
 
     def dump(self):
-        return {'imported':self.keypairs}
+        return { 'imported': self.keypairs,
+                 'imported_p2sh': self.p2sh_groups }
 
     def get_name(self, k):
         return _('Imported keys')
