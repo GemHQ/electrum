@@ -538,7 +538,6 @@ class Transaction:
     def multisig_script(klass, public_keys, num=None):
         n = len(public_keys)
         num = n if num is None else int(num)
-
         assert num <= n and n in [2,3] , 'Only "2 of 2", and "2 of 3" transactions are supported'
 
         if num==2:

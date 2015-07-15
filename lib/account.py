@@ -132,18 +132,26 @@ class P2SHAccount(object):
         address = hash_160_to_bc_address(hash_160(redeem_script.decode('hex')), 5)
         return address
 
-    def redeem_script(self, pubkeys=None, m=None):
-        pubkeys = self.xpubs if pubkeys is None else pubkeys
-        m = self.m if m is None else m
-        return Transaction.multisig_script(pubkeys, m)
+    def redeem_script(self, for_change, n):
+        pubkeys = self.get_pubkey(for_change, n)
+        return Transaction.multisig_script(pubkeys, self.get_m(for_change, n))
 
     def get_address(self, pubkeys=None, m=None):
         pubkeys = self.xpubs if pubkeys is None else pubkeys
         m = self.m if m is None else m
         return self.pubkeys_to_address(pubkeys, m)
 
+    def get_m(self, *sequence):
+        for_change, i = sequence
+        assert for_change == 0
+        try:
+            return self.m
+        except:
+            addr = self.get_addresses(0)[i]
+            return self.p2sh_groups[addr]['m']
 
-class ImportedAccount(Account, P2SHAccount):
+
+class ImportedAccount(P2SHAccount, Account):
 
     def __init__(self, d):
         self.keypairs = d.get('imported', {})
@@ -168,6 +176,9 @@ class ImportedAccount(Account, P2SHAccount):
             #     record['m']) for record in self.p2sh_groups.values() ]
         )
 
+    def get_pubkeys(self, *sequence):
+        pks = self.get_pubkey(*sequence)
+        return pks if isinstance(pks, list) else [ pks ]
     def get_pubkey(self, *sequence):
         for_change, i = sequence
         assert for_change == 0
@@ -192,8 +203,8 @@ class ImportedAccount(Account, P2SHAccount):
             if address != address_from_private_key(pk):
                 raise InvalidPassword()
             return [pk]
-        except IndexError as e:
-            pks = [ pw_decode(k[1]) for k in self.p2sh_groups[address]['keypairs'] ]
+        except KeyError as e:
+            pks = [ pw_decode(k[1], password) for k in self.p2sh_groups[address]['keypairs'] ]
             return pks
 
     def has_change(self):

@@ -1204,6 +1204,7 @@ class Abstract_Wallet(object):
 
 
     def get_private_key_from_xpubkey(self, x_pubkey, password):
+#       import pdb; pdb.set_trace()
         if x_pubkey[0:2] in ['02','03','04']:
             addr = bitcoin.public_key_to_bc_address(x_pubkey.decode('hex'))
             if self.is_mine(addr):
